@@ -90,7 +90,6 @@ func (l Logger) Error(ctx context.Context, str string, args ...interface{}) {
 }
 
 func (l Logger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
-	fmt.Println("Trace", l.LogLevel)
 	if l.LogLevel <= 0 {
 		return
 	}
