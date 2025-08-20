@@ -3,6 +3,7 @@ package zapgorm2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -26,13 +27,29 @@ type Logger struct {
 }
 
 func New(zapLogger *zap.Logger) Logger {
+	level := chooseLogLevel(zapLogger.Level())
 	return Logger{
 		ZapLogger:                 zapLogger,
-		LogLevel:                  gormlogger.Warn,
+		LogLevel:                  level,
 		SlowThreshold:             100 * time.Millisecond,
 		SkipCallerLookup:          false,
 		IgnoreRecordNotFoundError: false,
 		Context:                   nil,
+	}
+}
+
+func chooseLogLevel(level zapcore.Level) gormlogger.LogLevel {
+	switch level {
+	case zapcore.DebugLevel:
+		return gormlogger.Info
+	case zapcore.InfoLevel:
+		return gormlogger.Info
+	case zapcore.WarnLevel:
+		return gormlogger.Warn
+	case zapcore.ErrorLevel:
+		return gormlogger.Error
+	default:
+		return gormlogger.Warn
 	}
 }
 
@@ -73,6 +90,7 @@ func (l Logger) Error(ctx context.Context, str string, args ...interface{}) {
 }
 
 func (l Logger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
+	fmt.Println("Trace", l.LogLevel)
 	if l.LogLevel <= 0 {
 		return
 	}
@@ -81,13 +99,13 @@ func (l Logger) Trace(ctx context.Context, begin time.Time, fc func() (string, i
 	switch {
 	case err != nil && l.LogLevel >= gormlogger.Error && (!l.IgnoreRecordNotFoundError || !errors.Is(err, gorm.ErrRecordNotFound)):
 		sql, rows := fc()
-		logger.Error("trace", zap.Error(err), zap.Duration("elapsed", elapsed), zap.Int64("rows", rows), zap.String("sql", sql))
+		logger.Error("trace", zap.Error(err), SmartDurationField("elapsed", elapsed), zap.Int64("rows", rows), zap.String("sql", sql))
 	case l.SlowThreshold != 0 && elapsed > l.SlowThreshold && l.LogLevel >= gormlogger.Warn:
 		sql, rows := fc()
-		logger.Warn("trace", zap.Duration("elapsed", elapsed), zap.Int64("rows", rows), zap.String("sql", sql))
+		logger.Warn("trace", SmartDurationField("elapsed", elapsed), zap.Int64("rows", rows), zap.String("sql", sql))
 	case l.LogLevel >= gormlogger.Info:
 		sql, rows := fc()
-		logger.Debug("trace", zap.Duration("elapsed", elapsed), zap.Int64("rows", rows), zap.String("sql", sql))
+		logger.Debug("trace", SmartDurationField("elapsed", elapsed), zap.Int64("rows", rows), zap.String("sql", sql))
 	}
 }
 
@@ -119,4 +137,16 @@ func (l Logger) logger(ctx context.Context) *zap.Logger {
 		}
 	}
 	return logger
+}
+func SmartDurationField(key string, d time.Duration) zap.Field {
+	ns := d.Nanoseconds()
+	if ns < int64(time.Millisecond) {
+		return zap.String(key, fmt.Sprintf("%dns", ns))
+	} else if ns < int64(time.Second) {
+		ms := float64(ns) / 1e6
+		return zap.String(key, fmt.Sprintf("%.3fms", ms))
+	} else {
+		sec := float64(ns) / 1e9
+		return zap.String(key, fmt.Sprintf("%.3fs", sec))
+	}
 }
